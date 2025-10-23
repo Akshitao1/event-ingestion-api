@@ -55,12 +55,8 @@ Get processed events (development mode only)
 
 ```bash
 KAFKA_URL=your-kafka-broker-url
-SNOWFLAKE_ACCOUNT=your-snowflake-account
-SNOWFLAKE_PASSWORD=your-snowflake-password
-SNOWFLAKE_PRIVATE_KEY=your-snowflake-private-key
-SNOWFLAKE_USERNAME=your-snowflake-username
-SNOWFLAKE_URL=your-snowflake-url
 GOOGLE_SERVICE_ACCOUNT_KEY=your-google-service-account-json
+FORCE_DEV_MODE=false
 ```
 
 ## Google Sheets Setup
@@ -91,7 +87,7 @@ pip install -r requirements.txt
 
 # Set environment variables
 export KAFKA_URL=your-kafka-url
-export GOOGLE_SERVICE_ACCOUNT_KEY='{"type": "service_account", ...}'
+export GOOGLE_SERVICE_ACCOUNT_KEY='your-google-service-account-json'
 
 # Run the server
 python start_server.py

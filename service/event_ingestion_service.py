@@ -74,8 +74,13 @@ class EventIngestionService:
     def _download_with_service_account(self, sheet_id, gid):
         """Download Google Sheet using service account authentication"""
         try:
-            # Load service account credentials
-            service_account_info = json.loads(os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY'))
+            # Load service account credentials from environment
+            service_account_key = os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY')
+            if not service_account_key:
+                raise Exception("GOOGLE_SERVICE_ACCOUNT_KEY environment variable is not set")
+            
+            service_account_info = json.loads(service_account_key)
+            
             credentials = service_account.Credentials.from_service_account_info(
                 service_account_info,
                 scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
@@ -337,75 +342,14 @@ class EventIngestionService:
             return f"{selected_range}{third_octet}.{fourth_octet}"
     
     def fetch_url_from_snowflake(self, row):
-        """Fetch URL from Snowflake when URL column is empty"""
-        try:
-            from service.snowflake_client import query_snowflake
-            
-            # Get required values from row
-            client_id = row.get('CLIENT_ID', '').strip()  # Column I
-            ref_number = row.get('REF_NUMBER', '').strip()  # Column B
-            publisher_id = row.get('PUBLISHER_ID', '').strip()  # Column J
-            
-            # Check if all required fields are available
-            if not client_id or not ref_number or not publisher_id:
-                print(f"Missing required fields for URL lookup: client_id={client_id}, ref_number={ref_number}, publisher_id={publisher_id}")
-                return ""  # Return empty string if missing required fields
-            
-            # Build Snowflake query
-            query = f"""
-            SELECT url 
-            FROM jobs.modelled.live_jobs_cdc 
-            WHERE client_id = '{client_id}' 
-            AND refnumber = '{ref_number}' 
-            AND publisher_id = '{publisher_id}'
-            """
-            
-            print(f"Fetching URL from Snowflake with query: {query}")
-            
-            # Execute query
-            result = query_snowflake(query)
-            
-            if result and len(result) > 0:
-                url = result[0].get('URL', '')
-                print(f"Found URL from Snowflake: {url}")
-                return url
-            else:
-                print("No URL found in Snowflake for the given parameters")
-                return ""
-                
-        except Exception as e:
-            print(f"Error fetching URL from Snowflake: {str(e)}")
-            return ""
+        """Fetch URL from Snowflake when URL column is empty - DISABLED"""
+        print("Snowflake URL lookup is disabled - URL must be provided in the sheet")
+        return ""
     
     def fetch_country_from_snowflake(self, client_id, ref_number):
-        """Fetch country from Snowflake when JOB_COUNTRY is empty"""
-        try:
-            from service.snowflake_client import query_snowflake
-            
-            # Build Snowflake query
-            query = f"""
-            SELECT country 
-            FROM jobs.modelled.live_jobs_cdc 
-            WHERE client_id = '{client_id}' 
-            AND refnumber = '{ref_number}'
-            """
-            
-            print(f"Fetching country from Snowflake with query: {query}")
-            
-            # Execute query
-            result = query_snowflake(query)
-            
-            if result and len(result) > 0:
-                country = result[0].get('COUNTRY', '')
-                print(f"Found country from Snowflake: {country}")
-                return country
-            else:
-                print("No country found in Snowflake for the given parameters")
-                return ""
-                
-        except Exception as e:
-            print(f"Error fetching country from Snowflake: {str(e)}")
-            return ""
+        """Fetch country from Snowflake when JOB_COUNTRY is empty - DISABLED"""
+        print("Snowflake country lookup is disabled - JOB_COUNTRY must be provided in the sheet")
+        return ""
     
     def get_params_from_url(self, url):
         """Extract parameters from URL"""
@@ -437,19 +381,11 @@ class EventIngestionService:
             ref_number = row['REF_NUMBER']
             
             # Handle empty IP with country-based random IP generation
-            ip = row['IP'].strip() if row['IP'].strip() else None
+            ip = row.get('IP', '').strip() if row.get('IP', '').strip() else None
             job_country = row.get('JOB_COUNTRY', '').strip() if row.get('JOB_COUNTRY', '').strip() else None
             
             if not ip:
-                # If JOB_COUNTRY is empty but we have client_id and ref_number, fetch from Snowflake
-                if not job_country and 'CLIENT_ID' in row and 'REF_NUMBER' in row:
-                    client_id = row['CLIENT_ID'].strip()
-                    ref_number = row['REF_NUMBER'].strip()
-                    if client_id and ref_number:
-                        job_country = self.fetch_country_from_snowflake(client_id, ref_number)
-                        print(f"Fetched JOB_COUNTRY from Snowflake: {job_country}")
-                
-                # Generate random IP based on JOB_COUNTRY (from row or Snowflake)
+                # Generate random IP based on JOB_COUNTRY if available
                 if job_country:
                     ip = self.generate_random_ip_by_country(job_country)
                 else:
@@ -457,16 +393,16 @@ class EventIngestionService:
                     ip = "192.168.1.100"
             
             # Handle empty USER_AGENT with default value
-            user_agent = row['USER_AGENT'].strip() if row['USER_AGENT'].strip() else self.default_user_agent
+            user_agent = row.get('USER_AGENT', '').strip() if row.get('USER_AGENT', '').strip() else self.default_user_agent
             
             # Handle empty USER_FP with default value
-            user_fp = row['USER_FP'].strip() if row['USER_FP'].strip() else self.default_user_fp
+            user_fp = row.get('USER_FP', '').strip() if row.get('USER_FP', '').strip() else self.default_user_fp
             
             url = row['URL']
             
-            # Handle empty URL by fetching from Snowflake
+            # URL must be provided in the sheet - no Snowflake lookup
             if not url or url.strip() == "":
-                url = self.fetch_url_from_snowflake(row)
+                raise ValueError("URL is required and must be provided in the sheet")
             
             # Handle empty SOURCE with default value
             source = row['SOURCE'].strip() if row['SOURCE'].strip() else self.default_source
