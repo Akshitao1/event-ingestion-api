@@ -41,6 +41,7 @@ def query_snowflake(query_input_string):
     """Snowflake Connection Module."""
     # print("Connecting...")
     ans = []
+    cur = None
     try:
         cur = con.cursor()
         sql = ''' {} '''.format(str(query_input_string))
@@ -48,9 +49,15 @@ def query_snowflake(query_input_string):
 
         try:
             try:
-                # Use regular fetch instead of pandas
+                # Use fetchall() instead of fetch_pandas_all() to avoid pandas issues
                 results = cur.fetchall()
-                ans = results
+                columns = [desc[0] for desc in cur.description]
+                ans = []
+                for row in results:
+                    row_dict = {}
+                    for i, value in enumerate(row):
+                        row_dict[columns[i]] = value
+                    ans.append(row_dict)
             except Exception as e:
                 print("getting exception while fetching details:-{}".format(e))
                 ans = []
@@ -59,7 +66,11 @@ def query_snowflake(query_input_string):
     except Exception as e:
         print("Database call failed")
     finally:
-        cur.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception as e:
+                print(f"Error closing cursor: {e}")
         # print("cursor closed")
         return ans
 

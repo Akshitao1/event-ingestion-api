@@ -5,13 +5,13 @@
 PYTHONUNBUFFERED=1
 
 # Kafka Configuration
-KAFKA_URL=b-1.trkdatapipelinekafkav.b4dp67.c16.kafka.us-east-1.amazonaws.com:9092,b-2.trkdatapipelinekafkav.b4dp67.c16.kafka.us-east-1.amazonaws.com:9092
+KAFKA_URL=your_kafka_url_here
 
 # Snowflake Configuration
-SNOWFLAKE_ACCOUNT=vya01839.us-east-1
-SNOWFLAKE_PASSWORD=your_password_here
-SNOWFLAKE_PRIVATE_KEY=your_private_key_here
-SNOWFLAKE_URL=vya01839.us-east-1.snowflakecomputing.com
+SNOWFLAKE_ACCOUNT=your_snowflake_account_here
+SNOWFLAKE_PASSWORD=your_snowflake_password_here
+SNOWFLAKE_PRIVATE_KEY=your_snowflake_private_key_here
+SNOWFLAKE_URL=your_snowflake_url_here
 
 # Application Configuration
 FLASK_ENV=development

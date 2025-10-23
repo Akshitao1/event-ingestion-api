@@ -30,21 +30,27 @@ def health_check():
     # Check Kafka connectivity
     kafka_status = "connected"
     try:
-        from service.kafka_client import get_kafka_client, KAFKA_PYTHON_AVAILABLE
+        from service.kafka_client import get_kafka_client
         client = get_kafka_client()
-        if not KAFKA_PYTHON_AVAILABLE:
-            kafka_status = "rest_api_mode"
-        elif client == "REST_API":
-            kafka_status = "rest_api_mode"
-        elif not client:
+        if not client:
             kafka_status = "disconnected"
     except Exception:
         kafka_status = "disconnected"
+    
+    # Check Snowflake connectivity
+    snowflake_status = "disconnected"
+    try:
+        from service.snowflake_client import con
+        if con:
+            snowflake_status = "connected"
+    except Exception as e:
+        snowflake_status = f"error: {str(e)}"
     
     return jsonify({
         "status": "healthy", 
         "timestamp": datetime.now().isoformat(),
         "kafka_status": kafka_status,
+        "snowflake_status": snowflake_status,
         "environment": {
             "kafka_url": os.getenv('KAFKA_URL', 'not_set'),
             "snowflake_account": os.getenv('SNOWFLAKE_ACCOUNT', 'not_set')
@@ -182,6 +188,170 @@ def get_processed_events():
             "status": "error"
         }), 500
 
+@app.route('/api/test-snowflake', methods=['GET'])
+def test_snowflake():
+    """Test Snowflake connectivity and query execution"""
+    try:
+        from service.snowflake_client import query_snowflake
+        
+        # Test query - get current timestamp
+        result = query_snowflake("select job_ref_number , job_country  from jobs.modelled.inbound_jobs where client_id = 'c8c52114-38e7-4710-887f-fa6b47c62232' and job_ref_number = 'US_EN_97_043800_2250981'")
+        
+        if result is not None and len(result) > 0:
+            return jsonify({
+                "status": "success",
+                "message": "Snowflake connection successful",
+                "data": result,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Snowflake query returned no results",
+                "timestamp": datetime.now().isoformat()
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "message": f"Snowflake connection failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/query-snowflake', methods=['POST'])
+def query_snowflake_endpoint():
+    """Execute custom Snowflake query"""
+    try:
+        from service.snowflake_client import query_snowflake
+        from flask import request
+        
+        data = request.get_json()
+        if not data or 'query' not in data:
+            return jsonify({
+                "status": "error",
+                "message": "Query parameter is required"
+            }), 400
+        
+        query = data['query']
+        result = query_snowflake(query)
+        
+        return jsonify({
+            "status": "success",
+            "message": "Query executed successfully",
+            "data": result,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "message": f"Query execution failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/simple-snowflake-test', methods=['GET'])
+def simple_snowflake_test():
+    """Simple Snowflake test without complex queries"""
+    try:
+        from service.snowflake_client import con
+        
+        # Just test the connection without executing queries
+        if con:
+            return jsonify({
+                "status": "success",
+                "message": "Snowflake connection is active",
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Snowflake connection is not available",
+                "timestamp": datetime.now().isoformat()
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "message": f"Snowflake connection test failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/test-url-lookup', methods=['POST'])
+def test_url_lookup():
+    """Test URL lookup from Snowflake"""
+    try:
+        from service.event_ingestion_service import EventIngestionService
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "Request body is required"
+            }), 400
+        
+        # Create a test row with the provided data
+        test_row = {
+            'CLIENT_ID': data.get('client_id', ''),
+            'REF_NUMBER': data.get('ref_number', ''),
+            'PUBLISHER_ID': data.get('publisher_id', '')
+        }
+        
+        event_service = EventIngestionService()
+        url = event_service.fetch_url_from_snowflake(test_row)
+        
+        return jsonify({
+            "status": "success",
+            "message": "URL lookup completed",
+            "url": url,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "message": f"URL lookup failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/test-country-lookup', methods=['POST'])
+def test_country_lookup():
+    """Test country lookup from Snowflake"""
+    try:
+        from service.event_ingestion_service import EventIngestionService
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "Request body is required"
+            }), 400
+        
+        client_id = data.get('client_id', '')
+        ref_number = data.get('ref_number', '')
+        
+        if not client_id or not ref_number:
+            return jsonify({
+                "status": "error",
+                "message": "client_id and ref_number are required"
+            }), 400
+        
+        event_service = EventIngestionService()
+        country = event_service.fetch_country_from_snowflake(client_id, ref_number)
+        
+        return jsonify({
+            "status": "success",
+            "message": "Country lookup completed",
+            "country": country,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "message": f"Country lookup failed: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({"error": "Endpoint not found", "status": "error"}), 404
@@ -193,20 +363,22 @@ def internal_error(error):
 @app.teardown_appcontext
 def close_connections(error):
     """Close database connections on app teardown"""
-    try:
-        from service.kafka_client import get_kafka_client
-        client = get_kafka_client()
-        if client != "REST_API" and hasattr(client, 'close'):
-            client.close()
-    except Exception as e:
-        logger.error(f"Error closing Kafka client: {str(e)}")
-    
-    # Snowflake client removed for Vercel compatibility
+    # Don't close Kafka producer during requests to avoid RecordAccumulator is closed error
     # try:
-    #     from service.snowflake_client import snowflake_client
-    #     snowflake_client.close()
+    #     from service.kafka_client import kafka_producer
+    #     if kafka_producer and hasattr(kafka_producer, 'close'):
+    #         kafka_producer.close()
+    # except Exception as e:
+    #     logger.error(f"Error closing Kafka client: {str(e)}")
+    
+    # Don't close Snowflake connection during requests
+    # try:
+    #     from service.snowflake_client import con
+    #     if con and hasattr(con, 'close'):
+    #         con.close()
     # except Exception as e:
     #     logger.error(f"Error closing Snowflake client: {str(e)}")
+    pass
 
 if __name__ == '__main__':
     # For local development

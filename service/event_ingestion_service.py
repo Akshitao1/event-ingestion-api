@@ -296,6 +296,117 @@ class EventIngestionService:
             ip.encode('utf-8') + user_agent.encode('utf-8'),
         ).hexdigest()
     
+    def generate_random_ip_by_country(self, country_code):
+        """Generate a random IP address based on country code"""
+        # Country-specific IP ranges (simplified examples)
+        country_ip_ranges = {
+            'US': ['192.168.1.', '10.0.0.', '172.16.0.'],
+            'GB': ['192.168.2.', '10.1.0.', '172.17.0.'],
+            'CA': ['192.168.3.', '10.2.0.', '172.18.0.'],
+            'AU': ['192.168.4.', '10.3.0.', '172.19.0.'],
+            'DE': ['192.168.5.', '10.4.0.', '172.20.0.'],
+            'FR': ['192.168.6.', '10.5.0.', '172.21.0.'],
+            'IT': ['192.168.7.', '10.6.0.', '172.22.0.'],
+            'ES': ['192.168.8.', '10.7.0.', '172.23.0.'],
+            'NL': ['192.168.9.', '10.8.0.', '172.24.0.'],
+            'IN': ['192.168.10.', '10.9.0.', '172.25.0.'],
+            'JP': ['192.168.11.', '10.10.0.', '172.26.0.'],
+            'CN': ['192.168.12.', '10.11.0.', '172.27.0.'],
+            'BR': ['192.168.13.', '10.12.0.', '172.28.0.'],
+            'MX': ['192.168.14.', '10.13.0.', '172.29.0.'],
+            'RU': ['192.168.15.', '10.14.0.', '172.30.0.']
+        }
+        
+        # Default IP range if country not found
+        default_ranges = ['192.168.100.', '10.100.0.', '172.100.0.']
+        
+        # Get IP ranges for the country, or use default
+        ip_ranges = country_ip_ranges.get(country_code.upper(), default_ranges)
+        
+        # Select a random range and generate random IP
+        selected_range = random.choice(ip_ranges)
+        
+        if selected_range.endswith('.'):
+            # Generate last octet
+            last_octet = random.randint(1, 254)
+            return f"{selected_range}{last_octet}"
+        else:
+            # Generate last two octets
+            third_octet = random.randint(1, 254)
+            fourth_octet = random.randint(1, 254)
+            return f"{selected_range}{third_octet}.{fourth_octet}"
+    
+    def fetch_url_from_snowflake(self, row):
+        """Fetch URL from Snowflake when URL column is empty"""
+        try:
+            from service.snowflake_client import query_snowflake
+            
+            # Get required values from row
+            client_id = row.get('CLIENT_ID', '').strip()  # Column I
+            ref_number = row.get('REF_NUMBER', '').strip()  # Column B
+            publisher_id = row.get('PUBLISHER_ID', '').strip()  # Column J
+            
+            # Check if all required fields are available
+            if not client_id or not ref_number or not publisher_id:
+                print(f"Missing required fields for URL lookup: client_id={client_id}, ref_number={ref_number}, publisher_id={publisher_id}")
+                return ""  # Return empty string if missing required fields
+            
+            # Build Snowflake query
+            query = f"""
+            SELECT url 
+            FROM jobs.modelled.live_jobs_cdc 
+            WHERE client_id = '{client_id}' 
+            AND refnumber = '{ref_number}' 
+            AND publisher_id = '{publisher_id}'
+            """
+            
+            print(f"Fetching URL from Snowflake with query: {query}")
+            
+            # Execute query
+            result = query_snowflake(query)
+            
+            if result and len(result) > 0:
+                url = result[0].get('URL', '')
+                print(f"Found URL from Snowflake: {url}")
+                return url
+            else:
+                print("No URL found in Snowflake for the given parameters")
+                return ""
+                
+        except Exception as e:
+            print(f"Error fetching URL from Snowflake: {str(e)}")
+            return ""
+    
+    def fetch_country_from_snowflake(self, client_id, ref_number):
+        """Fetch country from Snowflake when JOB_COUNTRY is empty"""
+        try:
+            from service.snowflake_client import query_snowflake
+            
+            # Build Snowflake query
+            query = f"""
+            SELECT country 
+            FROM jobs.modelled.live_jobs_cdc 
+            WHERE client_id = '{client_id}' 
+            AND refnumber = '{ref_number}'
+            """
+            
+            print(f"Fetching country from Snowflake with query: {query}")
+            
+            # Execute query
+            result = query_snowflake(query)
+            
+            if result and len(result) > 0:
+                country = result[0].get('COUNTRY', '')
+                print(f"Found country from Snowflake: {country}")
+                return country
+            else:
+                print("No country found in Snowflake for the given parameters")
+                return ""
+                
+        except Exception as e:
+            print(f"Error fetching country from Snowflake: {str(e)}")
+            return ""
+    
     def get_params_from_url(self, url):
         """Extract parameters from URL"""
         parsed_url = urlparse(url)
@@ -303,10 +414,11 @@ class EventIngestionService:
         query_params_list = []
         
         for key in captured_value.keys():
-            query_params_list.append(str(key) + "=" + str(captured_value.get(key)[0]))
+            if captured_value.get(key) and len(captured_value.get(key)) > 0:
+                query_params_list.append(str(key) + "=" + str(captured_value.get(key)[0]))
         
-        jz = captured_value.get("jz")[0] if captured_value.get("jz") else ""
-        jx = captured_value.get("jx")[0] if captured_value.get("jx") else ""
+        jz = captured_value.get("jz")[0] if captured_value.get("jz") and len(captured_value.get("jz")) > 0 else ""
+        jx = captured_value.get("jx")[0] if captured_value.get("jx") and len(captured_value.get("jx")) > 0 else ""
 
         return {
             'url': url,
@@ -315,7 +427,7 @@ class EventIngestionService:
             'click_query_params': '&'.join(str(e) for e in query_params_list),
             'query_params': {
                 'a': '3',  # This will be overridden by dynamic parameter
-                'c': jz[1:5] if jz else ""
+                'c': jz[1:5] if jz and len(jz) >= 5 else ""
             }
         }
     
@@ -323,7 +435,26 @@ class EventIngestionService:
         """Process individual CSV row"""
         try:
             ref_number = row['REF_NUMBER']
-            ip = row['IP']
+            
+            # Handle empty IP with country-based random IP generation
+            ip = row['IP'].strip() if row['IP'].strip() else None
+            job_country = row.get('JOB_COUNTRY', '').strip() if row.get('JOB_COUNTRY', '').strip() else None
+            
+            if not ip:
+                # If JOB_COUNTRY is empty but we have client_id and ref_number, fetch from Snowflake
+                if not job_country and 'CLIENT_ID' in row and 'REF_NUMBER' in row:
+                    client_id = row['CLIENT_ID'].strip()
+                    ref_number = row['REF_NUMBER'].strip()
+                    if client_id and ref_number:
+                        job_country = self.fetch_country_from_snowflake(client_id, ref_number)
+                        print(f"Fetched JOB_COUNTRY from Snowflake: {job_country}")
+                
+                # Generate random IP based on JOB_COUNTRY (from row or Snowflake)
+                if job_country:
+                    ip = self.generate_random_ip_by_country(job_country)
+                else:
+                    # Fallback to default IP if no JOB_COUNTRY available
+                    ip = "192.168.1.100"
             
             # Handle empty USER_AGENT with default value
             user_agent = row['USER_AGENT'].strip() if row['USER_AGENT'].strip() else self.default_user_agent
@@ -332,6 +463,10 @@ class EventIngestionService:
             user_fp = row['USER_FP'].strip() if row['USER_FP'].strip() else self.default_user_fp
             
             url = row['URL']
+            
+            # Handle empty URL by fetching from Snowflake
+            if not url or url.strip() == "":
+                url = self.fetch_url_from_snowflake(row)
             
             # Handle empty SOURCE with default value
             source = row['SOURCE'].strip() if row['SOURCE'].strip() else self.default_source
@@ -379,7 +514,12 @@ class EventIngestionService:
         """Map row data to headers"""
         response = {}
         for index in range(len(headers)):
-            response[headers[index].upper()] = row[index]
+            # Safety check: ensure row has enough columns
+            if index < len(row):
+                response[headers[index].upper()] = row[index]
+            else:
+                # If row is shorter than headers, use empty string for missing columns
+                response[headers[index].upper()] = ""
         return response
     
     # Event preparation methods (these would need to be implemented based on your business logic)
@@ -393,7 +533,7 @@ class EventIngestionService:
             "jclick_id": details['jclick_id'],
             "jx": details['jx'],
             "jz": details['jz'],
-            "pixel_hashid": details['jz'][1:5],
+            "pixel_hashid": details['jz'][1:5] if details['jz'] and len(details['jz']) >= 5 else "",
             "query_parameters": details['query_params'],
             "request_url": details['url'],
             "shadow_event": False,
@@ -413,7 +553,7 @@ class EventIngestionService:
             "jclick_id": details['jclick_id'],
             "jx": details['jx'],
             "jz": details['jz'],
-            "pixel_hashid": details['jz'][1:5],
+            "pixel_hashid": details['jz'][1:5] if details['jz'] and len(details['jz']) >= 5 else "",
             "query_parameters": details['query_params'],
             "request_url": details['url'],
             "shadow_event": False,
@@ -436,7 +576,7 @@ class EventIngestionService:
             "jclick_id": details['jclick_id'],
             "jx": details['jx'],
             "jz": details['jz'],
-            "pixel_hashid": details['jz'][1:5],
+            "pixel_hashid": details['jz'][1:5] if details['jz'] and len(details['jz']) >= 5 else "",
             "pixel_s2s_event": False,
             "query_parameters": details['query_params'],
             "ref_number": details['ref_number'],
@@ -466,7 +606,7 @@ class EventIngestionService:
             "jclick_id": details['jclick_id'],
             "jx": details['jx'],
             "jz": details['jz'],
-            "pixel_hashid": details['jz'][1:5],
+            "pixel_hashid": details['jz'][1:5] if details['jz'] and len(details['jz']) >= 5 else "",
             "query_parameters": details['query_params'],
             "ref_number": details['ref_number'],
             "referrer_url": None,

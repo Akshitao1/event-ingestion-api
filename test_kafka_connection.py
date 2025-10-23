@@ -13,7 +13,7 @@ def test_kafka_connection():
     print("=" * 50)
     
     # Get Kafka URL from environment
-    kafka_url = os.getenv('KAFKA_URL', 'b-1.trkdatapipelinekafkav.b4dp67.c16.kafka.us-east-1.amazonaws.com:9092,b-2.trkdatapipelinekafkav.b4dp67.c16.kafka.us-east-1.amazonaws.com:9092')
+    kafka_url = os.getenv('KAFKA_URL', 'YOUR_KAFKA_URL_HERE')
     bootstrap_servers = kafka_url.split(',')
     
     print(f"Kafka Servers: {bootstrap_servers}")
@@ -155,6 +155,6 @@ def test_kafka_connection():
 
 if __name__ == "__main__":
     # Set environment variables
-    os.environ['KAFKA_URL'] = 'b-1.trkdatapipelinekafkav.b4dp67.c16.kafka.us-east-1.amazonaws.com:9092,b-2.trkdatapipelinekafkav.b4dp67.c16.kafka.us-east-1.amazonaws.com:9092'
+    os.environ['KAFKA_URL'] = 'YOUR_KAFKA_URL_HERE'
     
     test_kafka_connection()
