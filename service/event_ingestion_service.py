@@ -13,8 +13,13 @@ from service.file_handling_util import handle_error, flush_error_file
 from utils.error_handler import ErrorHandler
 import constants
 
-# Google Sheets support using direct CSV export URLs
-GOOGLE_SHEETS_AVAILABLE = True
+# Google Sheets API imports
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    GOOGLE_SHEETS_AVAILABLE = True
+except ImportError:
+    GOOGLE_SHEETS_AVAILABLE = False
 
 class EventIngestionService:
     def __init__(self):
@@ -39,7 +44,7 @@ class EventIngestionService:
         self.CLICKMETER_CONVERSION_KAFKA_TOPIC = constants.CLICKMETER_CONVERSION_KAFKA_TOPIC
     
     def download_google_sheet(self, url):
-        """Download Google Sheet as CSV using direct export URL"""
+        """Download Google Sheet as CSV using service account authentication"""
         try:
             if 'docs.google.com/spreadsheets' in url:
                 # Extract sheet ID from URL
@@ -50,26 +55,64 @@ class EventIngestionService:
                 if 'gid=' in url:
                     gid = url.split('gid=')[1].split('&')[0].split('#')[0]
                 
-                # Use direct CSV export URL (works with publicly accessible sheets)
-                csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
-                
-                response = requests.get(csv_url)
-                response.raise_for_status()
-                
-                # Create temporary file (Vercel compatible)
-                try:
-                    # Try to create a temporary file
-                    temp_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False)
-                    temp_file.write(response.text)
-                    temp_file.close()
-                    return temp_file.name
-                except (OSError, IOError):
-                    # Fallback: return the CSV content directly for in-memory processing
+                # Try service account method first
+                if GOOGLE_SHEETS_AVAILABLE and os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY'):
+                    return self._download_with_service_account(sheet_id, gid)
+                else:
+                    # Fallback to public export method
+                    csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+                    response = requests.get(csv_url)
+                    response.raise_for_status()
+                    
+                    # Return CSV content directly for in-memory processing
                     return response.text
             else:
                 raise ValueError("Invalid Google Sheets URL")
         except Exception as e:
             raise Exception(f"Error downloading Google Sheet: {str(e)}")
+    
+    def _download_with_service_account(self, sheet_id, gid):
+        """Download Google Sheet using service account authentication"""
+        try:
+            # Load service account credentials
+            service_account_info = json.loads(os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY'))
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
+            )
+            
+            # Build the service
+            service = build('sheets', 'v4', credentials=credentials)
+            
+            # Get the sheet name from the GID
+            spreadsheet = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+            sheet_name = None
+            
+            for sheet in spreadsheet['sheets']:
+                if str(sheet['properties']['sheetId']) == gid:
+                    sheet_name = sheet['properties']['title']
+                    break
+            
+            if not sheet_name:
+                sheet_name = spreadsheet['sheets'][0]['properties']['title']  # Default to first sheet
+            
+            # Read the sheet data
+            result = service.spreadsheets().values().get(
+                spreadsheetId=sheet_id,
+                range=sheet_name
+            ).execute()
+            
+            values = result.get('values', [])
+            
+            # Convert to CSV format
+            csv_content = []
+            for row in values:
+                csv_content.append(','.join(f'"{cell}"' for cell in row))
+            
+            return '\n'.join(csv_content)
+            
+        except Exception as e:
+            raise Exception(f"Error downloading with service account: {str(e)}")
     
     
     def _process_csv_content(self, csv_content):
