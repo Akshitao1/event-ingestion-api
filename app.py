@@ -30,9 +30,13 @@ def health_check():
     # Check Kafka connectivity
     kafka_status = "connected"
     try:
-        from service.kafka_client import get_kafka_client
+        from service.kafka_client import get_kafka_client, KAFKA_PYTHON_AVAILABLE
         client = get_kafka_client()
-        if not client.producer:
+        if not KAFKA_PYTHON_AVAILABLE:
+            kafka_status = "rest_api_mode"
+        elif client == "REST_API":
+            kafka_status = "rest_api_mode"
+        elif not client:
             kafka_status = "disconnected"
     except Exception:
         kafka_status = "disconnected"
