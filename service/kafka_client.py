@@ -80,18 +80,37 @@ def send_to_kafka(kafka_message, topic_name='trk-total-stat-source-events-topic'
         message_value = json.dumps(kafka_message).encode('utf-8')
         
         # Send message to Kafka
+        delivery_callback_called = False
+        delivery_success = False
+        
+        def delivery_callback(err, msg):
+            nonlocal delivery_callback_called, delivery_success
+            delivery_callback_called = True
+            if err:
+                print(f"❌ FAILED to deliver message to Kafka: {err}")
+                delivery_success = False
+            else:
+                print(f"✅ SUCCESS: Message delivered to {msg.topic()} [{msg.partition()}] at offset {msg.offset()}")
+                delivery_success = True
+        
         kafka_producer.produce(
             topic=topic_name,
             value=message_value,
-            callback=lambda err, msg: print(f"Message delivered to {msg.topic()} [{msg.partition()}] at offset {msg.offset()}") if not err else print(f"Failed to deliver message: {err}")
+            callback=delivery_callback
         )
         
         # Flush to ensure message is sent
         kafka_producer.flush(timeout=10)
         
-        print("Send event successfully to Kafka")
-        print(f"Topic: {topic_name}")
-        return True
+        # Check if delivery was successful
+        if delivery_callback_called and delivery_success:
+            print("✅ CONFIRMED: Event successfully sent to Kafka")
+            print(f"Topic: {topic_name}")
+            return True
+        else:
+            print("❌ FAILED: Event not delivered to Kafka")
+            print(f"Would send to Kafka: {kafka_message}")
+            return False
         
     except Exception as e:
         print(f"Error sending to Kafka: {e}")
