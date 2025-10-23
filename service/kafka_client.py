@@ -1,22 +1,22 @@
-"""Kafka Client."""
+"""Kafka Client using confluent-kafka."""
 import os
 import time
 import json
 
-# Try to import Kafka, fallback to mock if not available
+# Try to import confluent-kafka, fallback to mock if not available
 try:
-    from kafka import KafkaProducer
+    from confluent_kafka import Producer
     KAFKA_AVAILABLE = True
 except ImportError as e:
-    print(f"Kafka not available: {e}")
+    print(f"Confluent Kafka not available: {e}")
     KAFKA_AVAILABLE = False
-    KafkaProducer = None
+    Producer = None
 
 kafka_producer = None
 
 
 def get_kafka_client():
-    """Get Kafka Client method."""
+    """Get Kafka Client method using confluent-kafka."""
     global kafka_producer
     
     if not KAFKA_AVAILABLE:
@@ -29,15 +29,17 @@ def get_kafka_client():
             print("KAFKA_URL not set")
             return None
         try:
-            kafka_producer = KafkaProducer(
-                bootstrap_servers=url, 
-                value_serializer=lambda x: json.dumps(x).encode('utf-8'),
-                acks='all', 
-                retries=3,
-                request_timeout_ms=30000,
-                max_block_ms=30000,
-                api_version=(2, 5, 0)
-            )
+            # Convert comma-separated brokers to list
+            brokers = url.split(',')
+            config = {
+                'bootstrap.servers': ','.join(brokers),
+                'acks': 'all',
+                'retries': 3,
+                'request.timeout.ms': 30000,
+                'max.block.ms': 30000,
+                'api.version.request': True
+            }
+            kafka_producer = Producer(config)
         except Exception as e:
             print(f"Error creating Kafka producer: {e}")
             return None
@@ -59,7 +61,7 @@ def get_kafka_client_with_retries():
 
 
 def send_to_kafka(kafka_message, topic_name='trk-total-stat-source-events-topic'):
-    """Send to kafka method."""
+    """Send to kafka method using confluent-kafka."""
     global kafka_producer
     
     if not KAFKA_AVAILABLE:
@@ -74,16 +76,23 @@ def send_to_kafka(kafka_message, topic_name='trk-total-stat-source-events-topic'
         return True
     
     try:
-        future = kafka_producer.send(topic_name, kafka_message)
-        result = future.get(timeout=10)
-        if result is None:
-            print("failed to send following message to kafka:-{}".format(str(kafka_message)))
-            print("Would send to Kafka: {}".format(kafka_message))
-            return True
-        else:
-            print("Send event successfully to Kafka")
-            print(f"Topic: {topic_name}")
-            return True
+        # Serialize message
+        message_value = json.dumps(kafka_message).encode('utf-8')
+        
+        # Send message to Kafka
+        kafka_producer.produce(
+            topic=topic_name,
+            value=message_value,
+            callback=lambda err, msg: print(f"Message delivered to {msg.topic()} [{msg.partition()}] at offset {msg.offset()}") if not err else print(f"Failed to deliver message: {err}")
+        )
+        
+        # Flush to ensure message is sent
+        kafka_producer.flush(timeout=10)
+        
+        print("Send event successfully to Kafka")
+        print(f"Topic: {topic_name}")
+        return True
+        
     except Exception as e:
         print(f"Error sending to Kafka: {e}")
         print(f"Would send to Kafka: {kafka_message}")
@@ -111,7 +120,7 @@ def close_connections():
     global kafka_producer
     if kafka_producer:
         try:
-            kafka_producer.close()
+            kafka_producer.flush()
         except:
             pass
         kafka_producer = None
