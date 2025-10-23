@@ -3,7 +3,6 @@ from flask_cors import CORS
 import os
 import tempfile
 import requests
-import pandas as pd
 from datetime import datetime
 import logging
 import json
