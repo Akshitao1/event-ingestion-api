@@ -36,8 +36,8 @@ def get_kafka_client():
                 'acks': 'all',
                 'retries': 3,
                 'request.timeout.ms': 30000,
-                'max.block.ms': 30000,
-                'api.version.request': True
+                'api.version.request': True,
+                'security.protocol': 'PLAINTEXT'
             }
             kafka_producer = Producer(config)
         except Exception as e:
