@@ -48,9 +48,9 @@ def query_snowflake(query_input_string):
 
         try:
             try:
-                df = cur.fetch_pandas_all()
-                # ans = list(df['SOURCE_MESSAGE'])
-                ans = df
+                # Use regular fetch instead of pandas
+                results = cur.fetchall()
+                ans = results
             except Exception as e:
                 print("getting exception while fetching details:-{}".format(e))
                 ans = []

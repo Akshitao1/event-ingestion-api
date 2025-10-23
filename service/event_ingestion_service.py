@@ -6,7 +6,6 @@ import hashlib
 import os
 import tempfile
 import requests
-import pandas as pd
 import json
 from urllib.parse import urlparse, parse_qs
 from service.kafka_client import send_to_kafka
