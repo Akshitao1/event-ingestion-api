@@ -196,15 +196,17 @@ def close_connections(error):
     try:
         from service.kafka_client import get_kafka_client
         client = get_kafka_client()
-        client.close()
+        if client != "REST_API" and hasattr(client, 'close'):
+            client.close()
     except Exception as e:
         logger.error(f"Error closing Kafka client: {str(e)}")
     
-    try:
-        from service.snowflake_client import snowflake_client
-        snowflake_client.close()
-    except Exception as e:
-        logger.error(f"Error closing Snowflake client: {str(e)}")
+    # Snowflake client removed for Vercel compatibility
+    # try:
+    #     from service.snowflake_client import snowflake_client
+    #     snowflake_client.close()
+    # except Exception as e:
+    #     logger.error(f"Error closing Snowflake client: {str(e)}")
 
 if __name__ == '__main__':
     # For local development
