@@ -56,18 +56,34 @@ class EventIngestionService:
                 response = requests.get(csv_url)
                 response.raise_for_status()
                 
-                # Create temporary file
-                temp_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False)
-                temp_file.write(response.text)
-                temp_file.close()
-                
-                return temp_file.name
+                # Create temporary file (Vercel compatible)
+                try:
+                    # Try to create a temporary file
+                    temp_file = tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False)
+                    temp_file.write(response.text)
+                    temp_file.close()
+                    return temp_file.name
+                except (OSError, IOError):
+                    # Fallback: return the CSV content directly for in-memory processing
+                    return response.text
             else:
                 raise ValueError("Invalid Google Sheets URL")
         except Exception as e:
             raise Exception(f"Error downloading Google Sheet: {str(e)}")
     
     
+    def _process_csv_content(self, csv_content):
+        """Process CSV content (either file path or CSV string)"""
+        if isinstance(csv_content, str) and not csv_content.startswith('/') and not csv_content.endswith('.csv'):
+            # It's CSV content string, not a file path
+            import io
+            csv_file = io.StringIO(csv_content)
+            return csv.reader(csv_file)
+        else:
+            # It's a file path
+            with open(csv_content, 'r', newline='') as csv_file:
+                return csv.reader(csv_file)
+
     def validate_file(self, file_path):
         """Validate file and return validation result"""
         try:
@@ -76,24 +92,28 @@ class EventIngestionService:
                 # Download and validate
                 temp_file = self.download_google_sheet(file_path)
                 try:
-                    with open(temp_file, 'r', newline='') as csv_file:
-                        csv_reader = csv.reader(csv_file)
-                        headers = next(csv_reader)
-                        headers_upper = [h.upper() for h in headers]
-                        
-                        # Check mandatory columns
-                        missing_columns = []
-                        for col in self.mandatory_columns:
-                            if col not in headers_upper:
-                                missing_columns.append(col)
-                        
-                        return {
-                            'valid': len(missing_columns) == 0,
-                            'message': f"Missing columns: {missing_columns}" if missing_columns else "File is valid",
-                            'headers': headers
-                        }
+                    csv_reader = self._process_csv_content(temp_file)
+                    headers = next(csv_reader)
+                    headers_upper = [h.upper() for h in headers]
+                    
+                    # Check mandatory columns
+                    missing_columns = []
+                    for col in self.mandatory_columns:
+                        if col not in headers_upper:
+                            missing_columns.append(col)
+                    
+                    return {
+                        'valid': len(missing_columns) == 0,
+                        'message': f"Missing columns: {missing_columns}" if missing_columns else "File is valid",
+                        'headers': headers
+                    }
                 finally:
-                    os.unlink(temp_file)
+                    # Only try to delete if it's a file path, not CSV content
+                    if isinstance(temp_file, str) and (temp_file.startswith('/') or temp_file.endswith('.csv')):
+                        try:
+                            os.unlink(temp_file)
+                        except (OSError, IOError):
+                            pass  # Ignore errors in Vercel environment
             else:
                 # Local file validation
                 if not os.path.exists(file_path):
@@ -145,32 +165,34 @@ class EventIngestionService:
                 is_temp_file = False
             
             # Process the CSV file
-            with open(csv_file_path, newline='') as csv_file:
-                csv_reader = csv.reader(csv_file)
-                headers = {}
+            csv_reader = self._process_csv_content(csv_file_path)
+            headers = {}
+            
+            for index, row in enumerate(csv_reader):
+                if index == 0:
+                    headers = row
+                    if not self.validate_headers(headers):
+                        raise Exception("Mandatory columns missing")
+                    continue
                 
-                for index, row in enumerate(csv_reader):
-                    if index == 0:
-                        headers = row
-                        if not self.validate_headers(headers):
-                            raise Exception("Mandatory columns missing")
-                        continue
-                    
-                    try:
-                        self.process_row(
-                            self.get_row_with_headers(row, headers), 
-                            reason, 
-                            query_param_a, 
-                            date
-                        )
-                        processed_count += 1
-                    except Exception as e:
-                        error_count += 1
-                        self.error_handler.log_error(f"Error processing row {index}: {str(e)}")
+                try:
+                    self.process_row(
+                        self.get_row_with_headers(row, headers), 
+                        reason, 
+                        query_param_a, 
+                        date
+                    )
+                    processed_count += 1
+                except Exception as e:
+                    error_count += 1
+                    self.error_handler.log_error(f"Error processing row {index}: {str(e)}")
             
             # Clean up temporary file if created
-            if is_temp_file and os.path.exists(csv_file_path):
-                os.unlink(csv_file_path)
+            if is_temp_file and isinstance(csv_file_path, str) and (csv_file_path.startswith('/') or csv_file_path.endswith('.csv')):
+                try:
+                    os.unlink(csv_file_path)
+                except (OSError, IOError):
+                    pass  # Ignore errors in Vercel environment
             
             return {
                 'processed_count': processed_count,
