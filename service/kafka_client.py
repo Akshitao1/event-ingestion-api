@@ -1,84 +1,103 @@
-"""Kafka Client using REST API."""
+"""Kafka Client using aiokafka."""
 import os
 import time
 import json
-import requests
+import asyncio
+from typing import Optional
 
-# Use Kafka REST API instead of kafka-python
-KAFKA_AVAILABLE = True
+# Try to import aiokafka, fallback to mock if not available
+try:
+    from aiokafka import AIOKafkaProducer
+    KAFKA_AVAILABLE = True
+except ImportError as e:
+    print(f"aiokafka not available: {e}")
+    KAFKA_AVAILABLE = False
+    AIOKafkaProducer = None
+
+kafka_producer: Optional[AIOKafkaProducer] = None
 
 
-def get_kafka_client():
-    """Get Kafka Client method using REST API."""
+async def get_kafka_client():
+    """Get Kafka Client method using aiokafka."""
+    global kafka_producer
+    
     if not KAFKA_AVAILABLE:
         print("Kafka not available, returning None")
         return None
         
-    # For REST API, we don't need a persistent client
-    return "REST_API"
+    if kafka_producer is None or kafka_producer._closed:
+        url = os.getenv('KAFKA_URL')
+        if not url:
+            print("KAFKA_URL not set")
+            return None
+            
+        try:
+            kafka_producer = AIOKafkaProducer(
+                bootstrap_servers=url,
+                value_serializer=lambda x: json.dumps(x).encode('utf-8'),
+                acks='all',
+                retries=3,
+                request_timeout_ms=30000,
+                max_block_ms=30000,
+                api_version=(2, 5, 0)
+            )
+            await kafka_producer.start()
+        except Exception as e:
+            print(f"Error creating Kafka producer: {e}")
+            return None
+    return kafka_producer
 
 
-def get_kafka_client_with_retries():
+async def get_kafka_client_with_retries():
     """Get kafka client with retries method."""
     for i in range(3):
         try:
-            client = get_kafka_client()
+            client = await get_kafka_client()
             if client:
                 return client
         except Exception as e:
             print(f"Unable to get kafka client in retry {i+1}: {e}")
-            time.sleep(2)
+            await asyncio.sleep(2)
     return None
 
 
 def send_to_kafka(kafka_message, topic_name='trk-total-stat-source-events-topic'):
-    """Send to kafka using REST API."""
+    """Send to kafka method (sync wrapper for async)."""
     if not KAFKA_AVAILABLE:
         print("Kafka not available, logging to console instead")
         print(f"Would send to Kafka: {kafka_message}")
         return True
     
     try:
-        # Use Kafka REST API
-        kafka_url = os.getenv('KAFKA_URL')
-        if not kafka_url:
-            print("KAFKA_URL not set, logging to console instead")
+        # Run async function in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(_send_to_kafka_async(kafka_message, topic_name))
+        loop.close()
+        return result
+    except Exception as e:
+        print(f"Error in sync wrapper: {e}")
+        print(f"Would send to Kafka: {kafka_message}")
+        return True
+
+
+async def _send_to_kafka_async(kafka_message, topic_name):
+    """Async method to send to Kafka."""
+    try:
+        producer = await get_kafka_client_with_retries()
+        if not producer:
+            print("Kafka producer is None, logging to console instead")
             print(f"Would send to Kafka: {kafka_message}")
             return True
         
-        # Extract broker URL (use first broker for REST API)
-        broker_url = kafka_url.split(',')[0]
-        rest_url = f"http://{broker_url}/topics/{topic_name}"
+        # Send message to Kafka
+        await producer.send_and_wait(topic_name, kafka_message)
+        print("Send event successfully to Kafka")
+        print(f"Topic: {topic_name}")
+        return True
         
-        # Prepare message for REST API
-        message_data = {
-            "records": [
-                {
-                    "value": kafka_message
-                }
-            ]
-        }
-        
-        # Send to Kafka REST API
-        response = requests.post(
-            rest_url,
-            json=message_data,
-            headers={'Content-Type': 'application/vnd.kafka.json.v2+json'},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            print("Send event successfully to Kafka via REST API")
-            print(f"Topic: {topic_name}")
-            print(f"Response: {response.json()}")
-            return True
-        else:
-            print(f"Kafka REST API error: {response.status_code} - {response.text}")
-            return False
-            
     except Exception as e:
-        print(f"Error sending to Kafka via REST API: {e}")
-        # Fallback to console logging
+        print(f"Error sending to Kafka: {e}")
         print(f"Would send to Kafka: {kafka_message}")
         return True
 
@@ -99,7 +118,9 @@ def send_to_kafka_with_three_retries(kafka_message, topic_name):
     return False
 
 
-def close_connections():
+async def close_connections():
     """Close connections method."""
-    # REST API doesn't need connection closing
-    pass
+    global kafka_producer
+    if kafka_producer and not kafka_producer._closed:
+        await kafka_producer.stop()
+        kafka_producer = None
