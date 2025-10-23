@@ -1,125 +1,110 @@
-"""Kafka Client using confluent-kafka."""
+"""Event Sender using AWS SQS (replaces Kafka)."""
 import os
 import time
 import json
 
-# Try to import confluent-kafka, fallback to mock if not available
+# Try to import boto3, fallback to mock if not available
 try:
-    from confluent_kafka import Producer
-    KAFKA_AVAILABLE = True
+    import boto3
+    SQS_AVAILABLE = True
 except ImportError as e:
-    print(f"Confluent Kafka not available: {e}")
-    KAFKA_AVAILABLE = False
-    Producer = None
+    print(f"AWS SQS not available: {e}")
+    SQS_AVAILABLE = False
+    boto3 = None
 
-kafka_producer = None
+sqs_client = None
 
 
-def get_kafka_client():
-    """Get Kafka Client method using confluent-kafka."""
-    global kafka_producer
+def get_sqs_client():
+    """Get SQS Client method."""
+    global sqs_client
     
-    if not KAFKA_AVAILABLE:
-        print("Kafka not available, returning None")
+    if not SQS_AVAILABLE:
+        print("SQS not available, returning None")
         return None
         
-    if kafka_producer is None:
-        url = os.getenv('KAFKA_URL')
-        if not url:
-            print("KAFKA_URL not set")
-            return None
+    if sqs_client is None:
         try:
-            # Convert comma-separated brokers to list
-            brokers = url.split(',')
-            config = {
-                'bootstrap.servers': ','.join(brokers),
-                'acks': 'all',
-                'retries': 3,
-                'request.timeout.ms': 30000,
-                'api.version.request': True,
-                'security.protocol': 'PLAINTEXT'
-            }
-            kafka_producer = Producer(config)
+            sqs_client = boto3.client('sqs')
         except Exception as e:
-            print(f"Error creating Kafka producer: {e}")
+            print(f"Error creating SQS client: {e}")
             return None
-    return kafka_producer
+    return sqs_client
 
 
-def get_kafka_client_with_retries():
-    """Get kafka client with retries method."""
-    global kafka_producer
+def get_sqs_client_with_retries():
+    """Get SQS client with retries method."""
+    global sqs_client
     for i in range(3):
         try:
-            kafka_producer = get_kafka_client()
-            if kafka_producer:
+            sqs_client = get_sqs_client()
+            if sqs_client:
                 break
         except Exception as e:
-            print(f"Unable to get kafka producer in retry {i+1}: {e}")
+            print(f"Unable to get SQS client in retry {i+1}: {e}")
             time.sleep(2)
-    return kafka_producer
+    return sqs_client
 
 
 def send_to_kafka(kafka_message, topic_name='trk-total-stat-source-events-topic'):
-    """Send to kafka method using confluent-kafka."""
-    global kafka_producer
+    """Send to SQS method (replaces Kafka)."""
+    global sqs_client
     
-    if not KAFKA_AVAILABLE:
-        print("Kafka not available, logging to console instead")
-        print(f"Would send to Kafka: {kafka_message}")
+    if not SQS_AVAILABLE:
+        print("SQS not available, logging to console instead")
+        print(f"Would send to SQS: {kafka_message}")
         return True
     
-    kafka_producer = get_kafka_client_with_retries()
-    if not kafka_producer:
-        print("Kafka producer is None, logging to console instead")
-        print(f"Would send to Kafka: {kafka_message}")
+    sqs_client = get_sqs_client_with_retries()
+    if not sqs_client:
+        print("SQS client is None, logging to console instead")
+        print(f"Would send to SQS: {kafka_message}")
         return True
     
     try:
-        # Serialize message
-        message_value = json.dumps(kafka_message).encode('utf-8')
+        # Get SQS queue URL from environment
+        queue_url = os.getenv('SQS_QUEUE_URL')
+        if not queue_url:
+            print("SQS_QUEUE_URL not set, logging to console instead")
+            print(f"Would send to SQS: {kafka_message}")
+            return True
         
-        # Send message to Kafka
-        delivery_callback_called = False
-        delivery_success = False
+        # Prepare message for SQS
+        message_body = json.dumps({
+            'topic': topic_name,
+            'message': kafka_message,
+            'timestamp': int(time.time() * 1000)
+        })
         
-        def delivery_callback(err, msg):
-            nonlocal delivery_callback_called, delivery_success
-            delivery_callback_called = True
-            if err:
-                print(f"❌ FAILED to deliver message to Kafka: {err}")
-                delivery_success = False
-            else:
-                print(f"✅ SUCCESS: Message delivered to {msg.topic()} [{msg.partition()}] at offset {msg.offset()}")
-                delivery_success = True
-        
-        kafka_producer.produce(
-            topic=topic_name,
-            value=message_value,
-            callback=delivery_callback
+        # Send message to SQS
+        response = sqs_client.send_message(
+            QueueUrl=queue_url,
+            MessageBody=message_body,
+            MessageAttributes={
+                'topic': {
+                    'StringValue': topic_name,
+                    'DataType': 'String'
+                },
+                'source': {
+                    'StringValue': 'vercel-api',
+                    'DataType': 'String'
+                }
+            }
         )
         
-        # Flush to ensure message is sent
-        kafka_producer.flush(timeout=10)
-        
-        # Check if delivery was successful
-        if delivery_callback_called and delivery_success:
-            print("✅ CONFIRMED: Event successfully sent to Kafka")
-            print(f"Topic: {topic_name}")
-            return True
-        else:
-            print("❌ FAILED: Event not delivered to Kafka")
-            print(f"Would send to Kafka: {kafka_message}")
-            return False
+        print("✅ SUCCESS: Event sent to SQS")
+        print(f"Topic: {topic_name}")
+        print(f"MessageId: {response['MessageId']}")
+        return True
         
     except Exception as e:
-        print(f"Error sending to Kafka: {e}")
-        print(f"Would send to Kafka: {kafka_message}")
+        print(f"❌ FAILED: Error sending to SQS: {e}")
+        print(f"Would send to SQS: {kafka_message}")
         return True
 
 
 def send_to_kafka_with_three_retries(kafka_message, topic_name):
-    """Send to kafka with three retries method."""
+    """Send to SQS with three retries method."""
     for i in range(3):
         try:
             success = send_to_kafka(kafka_message, topic_name)
@@ -136,10 +121,6 @@ def send_to_kafka_with_three_retries(kafka_message, topic_name):
 
 def close_connections():
     """Close connections method."""
-    global kafka_producer
-    if kafka_producer:
-        try:
-            kafka_producer.flush()
-        except:
-            pass
-        kafka_producer = None
+    global sqs_client
+    # SQS doesn't need connection closing
+    sqs_client = None
