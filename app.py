@@ -40,7 +40,8 @@ def health_check():
     # Check Snowflake connectivity
     snowflake_status = "disconnected"
     try:
-        from service.snowflake_client import con
+        # Snowflake client removed - using environment variables only
+        con = None
         if con:
             snowflake_status = "connected"
     except Exception as e:
@@ -192,7 +193,8 @@ def get_processed_events():
 def test_snowflake():
     """Test Snowflake connectivity and query execution"""
     try:
-        from service.snowflake_client import query_snowflake
+        # Snowflake client removed - using environment variables only
+        query_snowflake = None
         
         # Test query - get current timestamp
         result = query_snowflake("select job_ref_number , job_country  from jobs.modelled.inbound_jobs where client_id = 'c8c52114-38e7-4710-887f-fa6b47c62232' and job_ref_number = 'US_EN_97_043800_2250981'")
@@ -222,7 +224,8 @@ def test_snowflake():
 def query_snowflake_endpoint():
     """Execute custom Snowflake query"""
     try:
-        from service.snowflake_client import query_snowflake
+        # Snowflake client removed - using environment variables only
+        query_snowflake = None
         from flask import request
         
         data = request.get_json()
@@ -253,7 +256,8 @@ def query_snowflake_endpoint():
 def simple_snowflake_test():
     """Simple Snowflake test without complex queries"""
     try:
-        from service.snowflake_client import con
+        # Snowflake client removed - using environment variables only
+        con = None
         
         # Just test the connection without executing queries
         if con:
